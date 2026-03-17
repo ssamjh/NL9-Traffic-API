@@ -1,8 +1,55 @@
 services:
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "ChangeMe@Strong1"   # change this
+      MSSQL_PID: Express
+    volumes:
+      - sql-data:/var/opt/mssql
+      - sql-backup:/var/opt/mssql/backup
+    ports:
+      - "1433:1433"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   trafficapi:
     build: .
     ports:
       - "5000:5000"
     volumes:
       - ./logs:/logs:ro
+      - ./backups:/backups:ro
+      - sql-backup:/mssql-backup
+    environment:
+      LOG_DIR: /logs
+      SQL_SERVER: sqlserver
+      SQL_PORT: "1433"
+      SQL_USER: sa
+      SQL_PASS: "ChangeMe@Strong1"   # must match SA_PASSWORD above
+      SQL_DB: NL9_Traffic
+      BACKUP_DIR: /backups
+      BACKUP_ZIP_NAME: NL9_Traffic.zip
+      BACKUP_BAK_NAME: NL9_Traffic.BAK
+      BAK_STAGE_DIR: /mssql-backup
+      BAK_SQLSERVER_DIR: /var/opt/mssql/backup
+      IMPORT_HOUR: "5"
+      IMPORT_MINUTE: "0"
+      SCHEDULER_TZ: Pacific/Auckland
+    depends_on:
+      - sqlserver
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sql-data:
+  sql-backup:

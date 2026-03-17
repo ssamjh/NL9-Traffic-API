@@ -1,166 +1,293 @@
-# NL9 Traffic Log API
+# NL9 Traffic API
 
-A lightweight Flask API that parses Natural Log 9 (NL9) traffic log files and exposes them as JSON. Designed to run in Docker with a read-only mount of log files.
+A Flask API for Natural Log 9 (NL9) traffic data. Exposes two data sources:
 
-## Quickstart
+- **Traffic logs** — parses NL9 daily broadcast log files
+- **Database** — queries client, order, and copy data from a daily SQL Server backup
+
+---
+
+## Requirements
+
+- Docker and Docker Compose
+- NL9 log files in `./logs/`
+- NL9 daily database backups in `./backups/YYYY-MM-DD/`
+
+---
+
+## Setup
+
+**1. Set a strong SQL Server password** in `docker-compose.yaml` — update `SA_PASSWORD` and `SQL_PASS` (both must match):
+
+```yaml
+SA_PASSWORD: "YourStrong@Password1"   # change this
+SQL_PASS:    "YourStrong@Password1"   # must match SA_PASSWORD
+```
+
+The password must meet SQL Server complexity requirements (uppercase, lowercase, digit, symbol, min 8 chars).
+
+**2. Create host directories** (once, before first run):
+
+```bash
+chmod +x setup.sh && ./setup.sh
+```
+
+This creates the `logs` and `backups` bind-mount directories. SQL Server data is kept in Docker named volumes (`sql-data`, `sql-backup`) which Docker manages automatically — no permission setup needed.
+
+**3. Start the stack:**
 
 ```bash
 docker compose up -d
 ```
 
-Place your NL9 log files in `./logs/` (or adjust the volume path in `docker-compose.yaml`).
+**4. Trigger the first database import:**
 
-## File naming convention
-
-Files must follow the NL9 pattern `MMDDYYt.log`, e.g.:
-
-```
-022026t.log   ← Feb 20, 2026
-022126t.log   ← Feb 21, 2026
-022226t.log   ← Feb 22, 2026
+```bash
+curl -X POST http://localhost:5000/db/import
 ```
 
-All matching files in the mounted directory are picked up automatically.
+After that, imports run automatically each day at 5:00 AM (configurable).
+
+---
+
+## Backup folder structure
+
+```
+backups/
+  2026-03-17/
+    NL9_Traffic.zip        ← contains NL9_Traffic.BAK
+  2026-03-18/
+    NL9_Traffic.zip
+```
+
+The API always imports the most recent date folder. Each import fully replaces the previous database.
+
+---
+
+## Configuration
+
+All settings are environment variables configured in `docker-compose.yaml`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SA_PASSWORD` / `SQL_PASS` | — | SQL Server SA password (set both to the same value) |
+| `LOG_DIR` | `/logs` | Path to NL9 log files |
+| `SQL_DB` | `NL9_Traffic` | Database name to restore into |
+| `BACKUP_DIR` | `/backups` | Path to dated backup folders |
+| `BACKUP_ZIP_NAME` | `NL9_Traffic.zip` | Zip file name inside each date folder |
+| `BACKUP_BAK_NAME` | `NL9_Traffic.BAK` | BAK file name inside the zip |
+| `IMPORT_HOUR` | `5` | Hour to run the daily import (0–23) |
+| `IMPORT_MINUTE` | `0` | Minute to run the daily import |
+| `SCHEDULER_TZ` | `Pacific/Auckland` | Timezone for the scheduler |
+
+---
 
 ## Endpoints
 
-### `GET /`
+### Database status
 
-Lists all available log files with metadata.
+#### `GET /db/status`
+
+Shows import state and next scheduled run.
 
 ```json
-[
-  {
-    "filename": "022026t.log",
-    "date": "022026",
-    "url": "/log/022026",
-    "entry_count": 87
-  }
-]
+{
+  "last_imported": "2026-03-18",
+  "latest_backup": "2026-03-18",
+  "up_to_date": true,
+  "next_scheduled_import": "2026-03-19T05:00:00+13:00"
+}
+```
+
+#### `POST /db/import`
+
+Manually trigger an import. Imports the latest backup only if it is newer than the last import. Safe to call repeatedly.
+
+```json
+{ "status": "imported", "date": "2026-03-18" }
+{ "status": "already_current", "date": "2026-03-18" }
 ```
 
 ---
 
-### `GET /log/<MMDDYY>`
+### Clients
 
-Returns all entries for a given date.
+#### `GET /clients`
 
-```
-/log/022026
-```
+List clients. Returns active clients by default.
 
-**Example response:**
+| Param | Description |
+|---|---|
+| `?id=` | Filter by exact customer ID |
+| `?q=` | Search name, billing name, or contact (substring) |
+| `?inactive=1` | Include inactive clients |
+
 ```json
 {
-  "date": "022026",
-  "entry_count": 87,
-  "entries": [
+  "count": 2,
+  "clients": [
     {
-      "line_number": 1,
-      "time": "00:20:00",
-      "spot_id": "5248",
-      "description": "Celebration Shoutouts: P",
-      "duration": 30,
-      "duration_formatted": "00:00:30",
-      "log_number": 3
+      "CustID": 101,
+      "Inactive": 0,
+      "Sponsor": "Acme Radio Co.",
+      "BillingName": "Acme Radio Co.",
+      "Contact": "Jane Smith",
+      "Telephone": "09 123 4567",
+      "EMail": "jane@acme.co.nz",
+      "CustomerSince": "2019-06-01T00:00:00",
+      "Orders": 14
     }
   ]
 }
 ```
 
+#### `GET /clients/<CustID>`
+
+Full client detail with agency information.
+
 ---
 
-### `GET /log/<MMDDYY>/<hour>`
+### Orders
 
-Returns entries for a specific hour (0–23) within a date.
+#### `GET /orders`
 
-```
-/log/022026/6    ← entries in the 06:xx:xx hour
-/log/022026/14   ← entries in the 14:xx:xx hour
-```
+List orders. Excludes deleted orders by default.
 
-**Example response:**
+| Param | Description |
+|---|---|
+| `?custid=` | Filter by customer ID |
+| `?status=` | Filter by status (e.g. `Active`, `Closed`) |
+| `?deleted=1` | Include deleted orders |
+
 ```json
 {
-  "date": "022026",
-  "hour": 6,
-  "entry_count": 12,
-  "entries": [...]
+  "count": 1,
+  "orders": [
+    {
+      "CustID": 101,
+      "OrderID": 55,
+      "Status": "Active",
+      "OrderAmount": 1200.0,
+      "OrderSpots": 20,
+      "StartDate": "2026-03-01T00:00:00",
+      "EndDate": "2026-03-31T00:00:00",
+      "Sponsor": "Acme Radio Co."
+    }
+  ]
 }
 ```
 
-## Entry fields
+#### `GET /orders/<CustID>-<OrderID>`
 
-| Field | Type | Example | Description |
-|---|---|---|---|
-| `line_number` | int | `1` | Log line sequence number |
-| `time` | string | `"00:20:00"` | Broadcast time (HH:MM:SS) |
-| `spot_id` | string | `"5248"` | Spot identifier |
-| `description` | string | `"Celebration Shoutouts: P"` | Spot description |
-| `duration` | int | `30` | Duration in seconds |
-| `duration_formatted` | string | `"00:00:30"` | Duration as HH:MM:SS |
-| `log_number` | int | `3` | Traffic log sequence number |
-
-## Query parameters
-
-All filter and sort parameters work on both `/log/<date>` and `/log/<date>/<hour>`.
-
-### Filtering by text fields
-
-Filter on `spot_id` or `description` individually. By default matching is **exact** (case-insensitive). Add `?exact=0` for substring search.
+Full order detail including lines and station assignments.
 
 ```
-?spot_id=5248
-?description=Fuel&exact=0
+GET /orders/101-55
 ```
 
-Use `?q=` to search across both text fields at once:
-
-```
-?q=Fuel&exact=0
-```
-
-| Param | Default | Description |
-|---|---|---|
-| `?spot_id=` | — | Match spot ID field |
-| `?description=` | — | Match description field |
-| `?q=` | — | Match either spot_id or description |
-| `?exact=` | `1` | `1` = exact match, `0` = substring |
+Response includes:
+- Order header fields
+- `lines` — each order line with copy label, length, cost, and scheduling details
+- `stations` — stations the order runs on
 
 ---
 
-### Sorting
+### Copy
 
+#### `GET /copy`
+
+List copy records. Returns active copy by default.
+
+| Param | Description |
+|---|---|
+| `?custid=` | Filter by customer ID |
+| `?q=` | Search label, copy ID, or script text (substring) |
+| `?inactive=1` | Include inactive copy |
+
+```json
+{
+  "count": 1,
+  "copy": [
+    {
+      "CopyIDLong": 8842,
+      "CopyID": "ACM001",
+      "Label": "Acme Summer Sale :30",
+      "Length": "30",
+      "Status": "Active",
+      "Voice": "John",
+      "AudioFileName": "ACM001.wav",
+      "Sponsor": "Acme Radio Co."
+    }
+  ]
+}
 ```
-?sort=duration&order=desc
-?sort=time&order=asc
+
+#### `GET /copy/<CopyIDLong>`
+
+Full copy detail including script, copy instructions, and rotator lines.
+
+---
+
+### Traffic logs
+
+#### `GET /`
+
+List all available log files.
+
+```json
+[
+  { "filename": "031826t.log", "date": "031826", "url": "/log/031826", "entry_count": 94 }
+]
 ```
+
+#### `GET /log/<MMDDYY>`
+
+All entries for a date.
+
+#### `GET /log/<MMDDYY>/<hour>`
+
+Entries for a specific hour (0–23).
+
+**Log query parameters** (apply to both log endpoints):
 
 | Param | Default | Description |
 |---|---|---|
-| `?sort=` | — | Any entry field name to sort by |
+| `?spot_id=` | — | Match spot ID |
+| `?description=` | — | Match description |
+| `?q=` | — | Match either field |
+| `?exact=` | `1` | `1` = exact, `0` = substring |
+| `?sort=` | — | Field to sort by |
 | `?order=` | `asc` | `asc` or `desc` |
 
-Entries with a missing value for the sort key are placed last.
+**Log entry fields:**
+
+| Field | Example | Description |
+|---|---|---|
+| `time` | `"14:00:00"` | Broadcast time |
+| `spot_id` | `"5248"` | Spot identifier |
+| `description` | `"Acme Summer Sale :30"` | Spot description |
+| `duration` | `30` | Duration in seconds |
+| `duration_formatted` | `"00:00:30"` | Duration as HH:MM:SS |
+| `log_number` | `3` | Traffic log sequence number |
 
 ---
 
-### Combining parameters
+## Data directories
 
-All parameters can be combined freely:
+These local directories are created automatically by Docker on first run:
 
-```
-/log/022026?q=Fuel&exact=0&sort=duration&order=desc
-/log/022026/6?spot_id=5248
-```
-
-## Configuration
-
-| Environment variable | Default | Description |
+| Location | Type | Contents |
 |---|---|---|
-| `LOG_DIR` | `/logs` | Path to the directory containing NL9 log files |
+| `sql-data` | Docker named volume | SQL Server data files — managed by Docker |
+| `sql-backup` | Docker named volume | Staged BAK files used during restore — managed by Docker |
+| `./logs` | Bind mount | NL9 traffic log files |
+| `./backups` | Bind mount | NL9 daily backup zips |
+
+---
 
 ## Notes
 
-- Files are read on every request — no caching or database
-- The `→` character in NL9 log lines is used as a field delimiter in parsing
+- Log files are read on every request — no caching
+- The database is a full restore each import; existing data is replaced
+- The scheduler runs inside the API process — no separate cron container needed
+- SQL Server 2019 can restore SQL Server 2014 backups
