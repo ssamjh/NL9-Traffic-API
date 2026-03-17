@@ -269,6 +269,11 @@ def index():
     return jsonify(get_logs())
 
 
+@app.route("/logs")
+def logs():
+    return jsonify(get_logs())
+
+
 @app.route("/log/<date>")
 def log_day(date):
     pattern = os.path.join(LOG_DIR, f"{date}t.log")
@@ -565,6 +570,53 @@ def copy_detail(copy_id_long):
         result = rows[0]
         result["rotator_lines"] = rotators
         return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+# ─── Account rep endpoints ────────────────────────────────────────────────────
+
+@app.route("/reps")
+def reps():
+    """
+    GET /reps
+    Query params:
+      ?inactive=1     include inactive reps (default: active only)
+    """
+    if not DB_AVAILABLE:
+        return db_unavailable()
+    try:
+        inactive = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
+        where = "" if inactive else "WHERE InActive = 0"
+        rows = db_query(f"""
+            SELECT AccountRepID, InActive, AccountRepName, AccountRepEMail,
+                   DefaultAgencyCommission, DefaultDirectCommission,
+                   DefaultTradeCommission, QBSalesRep
+            FROM AccountReps
+            {where}
+            ORDER BY AccountRepName
+        """)
+        return jsonify({"count": len(rows), "reps": rows})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/reps/<int:rep_id>")
+def rep_detail(rep_id):
+    """GET /reps/<AccountRepID> — single account rep record."""
+    if not DB_AVAILABLE:
+        return db_unavailable()
+    try:
+        rows = db_query("""
+            SELECT AccountRepID, InActive, AccountRepName, AccountRepEMail,
+                   DefaultAgencyCommission, DefaultDirectCommission,
+                   DefaultTradeCommission, QBSalesRep
+            FROM AccountReps
+            WHERE AccountRepID = %s
+        """, (rep_id,))
+        if not rows:
+            abort(404)
+        return jsonify(rows[0])
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

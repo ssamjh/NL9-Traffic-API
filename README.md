@@ -3,7 +3,7 @@
 A Flask API for Natural Log 9 (NL9) traffic data. Exposes two data sources:
 
 - **Traffic logs** — parses NL9 daily broadcast log files
-- **Database** — queries client, order, and copy data from a daily SQL Server backup
+- **Database** — queries client, order, copy, and account rep data from a daily SQL Server backup
 
 ---
 
@@ -228,11 +228,45 @@ Full copy detail including script, copy instructions, and rotator lines.
 
 ---
 
+### Account reps
+
+#### `GET /reps`
+
+List account reps. Returns active reps by default.
+
+| Param | Description |
+|---|---|
+| `?inactive=1` | Include inactive reps |
+
+```json
+{
+  "count": 2,
+  "reps": [
+    {
+      "AccountRepID": 1,
+      "InActive": 0,
+      "AccountRepName": "Jane Smith",
+      "AccountRepEMail": "jane@example.com",
+      "DefaultAgencyCommission": 0.0,
+      "DefaultDirectCommission": 0.0,
+      "DefaultTradeCommission": 0.0,
+      "QBSalesRep": ""
+    }
+  ]
+}
+```
+
+#### `GET /reps/<AccountRepID>`
+
+Single account rep record.
+
+---
+
 ### Traffic logs
 
-#### `GET /`
+#### `GET /logs`
 
-List all available log files.
+List all available log files. Also available at `GET /`.
 
 ```json
 [
