@@ -482,8 +482,8 @@ def orders():
       ?start_before=YYYY-MM-DD  StartDate <= date
       ?end_after=YYYY-MM-DD     EndDate >= date
       ?end_before=YYYY-MM-DD    EndDate <= date
-      ?valid_after=YYYY-MM-DD   Status=Active and EndDate >= date (still valid after date)
-      ?valid_before=YYYY-MM-DD  Status=Active and StartDate <= date (valid by date)
+      ?valid_after=YYYY-MM-DD   Status=Ok and EndDate >= date (still valid after date)
+      ?valid_before=YYYY-MM-DD  Status=Ok and StartDate <= date (valid by date)
       ?missing_copy=1           only orders with at least one line missing copy
       ?exclude_custid=1,2,3     exclude one or more customers (comma-separated)
       ?is_empty=<field>         only orders where the specified field is null or empty
@@ -536,11 +536,11 @@ def orders():
             conditions.append("CAST(o.EndDate AS DATE) <= %s")
             params.append(end_before)
         if valid_after:
-            conditions.append("o.Status = 'Active'")
+            conditions.append("o.Status = 'Ok'")
             conditions.append("CAST(o.EndDate AS DATE) >= %s")
             params.append(valid_after)
         if valid_before:
-            conditions.append("o.Status = 'Active'")
+            conditions.append("o.Status = 'Ok'")
             conditions.append("CAST(o.StartDate AS DATE) <= %s")
             params.append(valid_before)
         if exclude_custid:
