@@ -162,7 +162,10 @@ List orders, sorted most recent first. Excludes deleted orders by default.
 | `?start_before=YYYY-MM-DD` | StartDate on or before date |
 | `?end_after=YYYY-MM-DD` | EndDate on or after date |
 | `?end_before=YYYY-MM-DD` | EndDate on or before date |
+| `?valid_after=YYYY-MM-DD` | `Status=Active` and EndDate on or after date |
+| `?valid_before=YYYY-MM-DD` | `Status=Active` and StartDate on or before date |
 | `?missing_copy=1` | Only orders with at least one line missing a copy assignment |
+| `?exclude_custid=1,2,3` | Exclude one or more customers (comma-separated IDs) |
 
 ```json
 {
@@ -208,10 +211,15 @@ List copy records, sorted most recent first. Returns active copy by default.
 | `?custid=` | Filter by customer ID |
 | `?q=` | Search label, copy ID, or script text (substring) |
 | `?inactive=1` | Include inactive copy |
+| `?status=` | Filter by status (e.g. `Ok`, `Deleted`) |
+| `?on_date=YYYY-MM-DD` | Only copy with `Status=Ok` whose start/end range covers the date (TFN-safe) |
+| `?valid_after=YYYY-MM-DD` | `Status=Ok` and EndDate on or after date |
+| `?valid_before=YYYY-MM-DD` | `Status=Ok` and StartDate on or before date |
 | `?start_after=YYYY-MM-DD` | StartDate on or after date |
 | `?start_before=YYYY-MM-DD` | StartDate on or before date |
 | `?end_after=YYYY-MM-DD` | EndDate on or after date |
 | `?end_before=YYYY-MM-DD` | EndDate on or before date |
+| `?exclude_custid=1,2,3` | Exclude one or more customers (comma-separated IDs) |
 
 ```json
 {

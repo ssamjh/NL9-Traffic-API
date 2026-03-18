@@ -448,19 +448,25 @@ def orders():
       ?start_before=YYYY-MM-DD  StartDate <= date
       ?end_after=YYYY-MM-DD     EndDate >= date
       ?end_before=YYYY-MM-DD    EndDate <= date
+      ?valid_after=YYYY-MM-DD   Status=Active and EndDate >= date (still valid after date)
+      ?valid_before=YYYY-MM-DD  Status=Active and StartDate <= date (valid by date)
       ?missing_copy=1           only orders with at least one line missing copy
+      ?exclude_custid=1,2,3     exclude one or more customers (comma-separated)
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        cust_id      = request.args.get("custid") or request.args.get("id")
-        status       = request.args.get("status")
-        deleted      = request.args.get("deleted", "0").lower() in ("1", "true", "yes")
-        start_after  = request.args.get("start_after")
-        start_before = request.args.get("start_before")
-        end_after    = request.args.get("end_after")
-        end_before   = request.args.get("end_before")
-        missing_copy = request.args.get("missing_copy", "0").lower() in ("1", "true", "yes")
+        cust_id        = request.args.get("custid") or request.args.get("id")
+        status         = request.args.get("status")
+        deleted        = request.args.get("deleted", "0").lower() in ("1", "true", "yes")
+        start_after    = request.args.get("start_after")
+        start_before   = request.args.get("start_before")
+        end_after      = request.args.get("end_after")
+        end_before     = request.args.get("end_before")
+        valid_after    = request.args.get("valid_after")
+        valid_before   = request.args.get("valid_before")
+        missing_copy   = request.args.get("missing_copy", "0").lower() in ("1", "true", "yes")
+        exclude_custid = [int(x) for x in request.args.get("exclude_custid", "").split(",") if x.strip()]
 
         conditions = []
         params = []
@@ -482,17 +488,29 @@ def orders():
                 )
             """)
         if start_after:
-            conditions.append("o.StartDate >= %s")
+            conditions.append("CAST(o.StartDate AS DATE) >= %s")
             params.append(start_after)
         if start_before:
-            conditions.append("o.StartDate <= %s")
+            conditions.append("CAST(o.StartDate AS DATE) <= %s")
             params.append(start_before)
         if end_after:
-            conditions.append("o.EndDate >= %s")
+            conditions.append("CAST(o.EndDate AS DATE) >= %s")
             params.append(end_after)
         if end_before:
-            conditions.append("o.EndDate <= %s")
+            conditions.append("CAST(o.EndDate AS DATE) <= %s")
             params.append(end_before)
+        if valid_after:
+            conditions.append("o.Status = 'Active'")
+            conditions.append("CAST(o.EndDate AS DATE) >= %s")
+            params.append(valid_after)
+        if valid_before:
+            conditions.append("o.Status = 'Active'")
+            conditions.append("CAST(o.StartDate AS DATE) <= %s")
+            params.append(valid_before)
+        if exclude_custid:
+            placeholders = ", ".join(["%s"] * len(exclude_custid))
+            conditions.append(f"o.CustID NOT IN ({placeholders})")
+            params.extend(exclude_custid)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = db_query(f"""
@@ -573,21 +591,31 @@ def copy_list():
       ?custid=<CustID>          filter by customer
       ?q=<text>                 search Label, CopyID, Script (case-insensitive)
       ?inactive=1               include inactive copy (default: active only)
+      ?status=<Status>          filter by status (e.g. Ok, Deleted)
+      ?on_date=YYYY-MM-DD       only copy with Status=Ok and date within StartDate/EndDate
+      ?valid_after=YYYY-MM-DD   Status=Ok and EndDate >= date (still valid after date)
+      ?valid_before=YYYY-MM-DD  Status=Ok and StartDate <= date (valid by date)
       ?start_after=YYYY-MM-DD   StartDate >= date
       ?start_before=YYYY-MM-DD  StartDate <= date
       ?end_after=YYYY-MM-DD     EndDate >= date
       ?end_before=YYYY-MM-DD    EndDate <= date
+      ?exclude_custid=1,2,3     exclude one or more customers (comma-separated)
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        cust_id      = request.args.get("custid")
-        q            = request.args.get("q")
-        inactive     = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
-        start_after  = request.args.get("start_after")
-        start_before = request.args.get("start_before")
-        end_after    = request.args.get("end_after")
-        end_before   = request.args.get("end_before")
+        cust_id        = request.args.get("custid")
+        q              = request.args.get("q")
+        inactive       = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
+        status         = request.args.get("status")
+        on_date        = request.args.get("on_date")
+        valid_after    = request.args.get("valid_after")
+        valid_before   = request.args.get("valid_before")
+        start_after    = request.args.get("start_after")
+        start_before   = request.args.get("start_before")
+        end_after      = request.args.get("end_after")
+        end_before     = request.args.get("end_before")
+        exclude_custid = [int(x) for x in request.args.get("exclude_custid", "").split(",") if x.strip()]
 
         conditions = []
         params = []
@@ -601,18 +629,36 @@ def copy_list():
             conditions.append("(cm.Label LIKE %s OR cm.CopyID LIKE %s OR cm.Script LIKE %s)")
             like = f"%{q}%"
             params.extend([like, like, like])
+        if status:
+            conditions.append("cm.Status = %s")
+            params.append(status)
+        if on_date:
+            valid_after = valid_after or on_date
+            valid_before = valid_before or on_date
+        if valid_after:
+            conditions.append("cm.Status = 'Ok'")
+            conditions.append("CAST(cm.EndDate AS DATE) >= %s")
+            params.append(valid_after)
+        if valid_before:
+            conditions.append("cm.Status = 'Ok'")
+            conditions.append("CAST(cm.StartDate AS DATE) <= %s")
+            params.append(valid_before)
         if start_after:
-            conditions.append("cm.StartDate >= %s")
+            conditions.append("CAST(cm.StartDate AS DATE) >= %s")
             params.append(start_after)
         if start_before:
-            conditions.append("cm.StartDate <= %s")
+            conditions.append("CAST(cm.StartDate AS DATE) <= %s")
             params.append(start_before)
         if end_after:
-            conditions.append("cm.EndDate >= %s")
+            conditions.append("CAST(cm.EndDate AS DATE) >= %s")
             params.append(end_after)
         if end_before:
-            conditions.append("cm.EndDate <= %s")
+            conditions.append("CAST(cm.EndDate AS DATE) <= %s")
             params.append(end_before)
+        if exclude_custid:
+            placeholders = ", ".join(["%s"] * len(exclude_custid))
+            conditions.append(f"cm.CustID NOT IN ({placeholders})")
+            params.extend(exclude_custid)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = db_query(f"""
