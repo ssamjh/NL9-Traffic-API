@@ -75,9 +75,17 @@ def parse_log_filename(filename):
     return match.group(1) if match else None
 
 
+def _log_sort_key(filename):
+    """Convert MMDDYY filename to a YYMMDD sort key for chronological ordering."""
+    date_str = parse_log_filename(filename)
+    if not date_str:
+        return ""
+    return date_str[4:6] + date_str[0:2] + date_str[2:4]
+
+
 def get_logs():
     pattern = os.path.join(LOG_DIR, "*t.log")
-    files = sorted(glob.glob(pattern))
+    files = sorted(glob.glob(pattern), key=_log_sort_key)
     result = []
     for f in files:
         date_str = parse_log_filename(f)
@@ -266,12 +274,34 @@ def do_import(date_str, zip_path):
 
 @app.route("/")
 def index():
-    return jsonify(get_logs())
+    all_logs = get_logs()
+    total = len(all_logs)
+    limit = request.args.get("limit", 100, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    page = all_logs[offset: offset + limit]
+    return jsonify({
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "count": len(page),
+        "logs": page,
+    })
 
 
 @app.route("/logs")
 def logs():
-    return jsonify(get_logs())
+    all_logs = get_logs()
+    total = len(all_logs)
+    limit = request.args.get("limit", 100, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    page = all_logs[offset: offset + limit]
+    return jsonify({
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "count": len(page),
+        "logs": page,
+    })
 
 
 @app.route("/log/<date>")

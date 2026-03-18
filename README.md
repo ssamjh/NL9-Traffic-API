@@ -266,12 +266,25 @@ Single account rep record.
 
 #### `GET /logs`
 
-List all available log files. Also available at `GET /`.
+List available log files, sorted chronologically (newest last). Also available at `GET /`. Returns the most recent 100 by default.
+
+**Query parameters:**
+
+| Param | Default | Description |
+|---|---|---|
+| `?limit=` | `100` | Number of results to return |
+| `?offset=` | `0` | Number of results to skip (for pagination) |
 
 ```json
-[
-  { "filename": "031826t.log", "date": "031826", "url": "/log/031826", "entry_count": 94 }
-]
+{
+  "total": 312,
+  "limit": 100,
+  "offset": 0,
+  "count": 100,
+  "logs": [
+    { "filename": "031826t.log", "date": "031826", "url": "/log/031826", "entry_count": 94 }
+  ]
+}
 ```
 
 #### `GET /log/<MMDDYY>`
