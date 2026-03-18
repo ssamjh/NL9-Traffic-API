@@ -854,7 +854,7 @@ def _resolve_copy(copy_id_long, resolve_date, visited=None, depth=0):
     visited = visited | {copy_id_long}
 
     rows = db_query(
-        "SELECT CopyIDLong, CopyID, CopyType, AudioFileName FROM CopyManager WHERE CopyIDLong = %s",
+        "SELECT CopyIDLong, CopyID, CopyType, AudioFileName, StartDate, EndDate, Inactive FROM CopyManager WHERE CopyIDLong = %s",
         (copy_id_long,),
     )
     if not rows:
@@ -865,6 +865,14 @@ def _resolve_copy(copy_id_long, resolve_date, visited=None, depth=0):
     is_container = cid.startswith("P") or cid.startswith("R")
 
     if not is_container:
+        if copy.get("Inactive"):
+            return []
+        start = copy.get("StartDate")
+        end = copy.get("EndDate")
+        if start and resolve_date < (start.date() if hasattr(start, "date") else start):
+            return []
+        if end and resolve_date > (end.date() if hasattr(end, "date") else end):
+            return []
         return [{"audio": copy["AudioFileName"], "path": [copy["CopyID"]]}]
 
     day_col = f"RotLineDay{resolve_date.isoweekday()}"
