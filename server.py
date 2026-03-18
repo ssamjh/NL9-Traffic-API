@@ -83,22 +83,29 @@ def _log_sort_key(filename):
     return date_str[4:6] + date_str[0:2] + date_str[2:4]
 
 
-def get_logs():
+def _count_entries(filepath):
+    return sum(
+        1 for line in open(filepath, encoding="utf-8", errors="replace")
+        if LINE_RE.match(line)
+    )
+
+
+def get_logs(count_entries=True):
     pattern = os.path.join(LOG_DIR, "*t.log")
-    files = sorted(glob.glob(pattern), key=_log_sort_key)
+    files = sorted(glob.glob(pattern), key=_log_sort_key, reverse=True)
     result = []
     for f in files:
         date_str = parse_log_filename(f)
         if date_str:
-            result.append({
+            entry = {
                 "filename": os.path.basename(f),
                 "date": date_str,
                 "url": f"/log/{date_str}",
-                "entry_count": sum(
-                    1 for line in open(f, encoding="utf-8", errors="replace")
-                    if LINE_RE.match(line)
-                ),
-            })
+                "_filepath": f,
+            }
+            if count_entries:
+                entry["entry_count"] = _count_entries(f)
+            result.append(entry)
     return result
 
 
@@ -272,13 +279,17 @@ def do_import(date_str, zip_path):
 
 # ─── Log endpoints ────────────────────────────────────────────────────────────
 
-@app.route("/")
-def index():
-    all_logs = get_logs()
+def _logs_response():
+    all_logs = get_logs(count_entries=False)
     total = len(all_logs)
     limit = request.args.get("limit", 100, type=int)
     offset = request.args.get("offset", 0, type=int)
-    page = all_logs[offset: offset + limit]
+    page_raw = all_logs[offset: offset + limit]
+    page = []
+    for entry in page_raw:
+        filepath = entry.pop("_filepath")
+        entry["entry_count"] = _count_entries(filepath)
+        page.append(entry)
     return jsonify({
         "total": total,
         "limit": limit,
@@ -286,22 +297,17 @@ def index():
         "count": len(page),
         "logs": page,
     })
+
+
+@app.route("/")
+def index():
+    return _logs_response()
 
 
 @app.route("/logs")
 def logs():
-    all_logs = get_logs()
-    total = len(all_logs)
-    limit = request.args.get("limit", 100, type=int)
-    offset = request.args.get("offset", 0, type=int)
-    page = all_logs[offset: offset + limit]
-    return jsonify({
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "count": len(page),
-        "logs": page,
-    })
+    return _logs_response()
+
 
 
 @app.route("/log/<date>")
