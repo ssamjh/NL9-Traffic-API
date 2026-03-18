@@ -26,21 +26,13 @@ SQL_PASS:    "YourStrong@Password1"   # must match SA_PASSWORD
 
 The password must meet SQL Server complexity requirements (uppercase, lowercase, digit, symbol, min 8 chars).
 
-**2. Create host directories** (once, before first run):
-
-```bash
-chmod +x setup.sh && ./setup.sh
-```
-
-This creates the `logs` and `backups` bind-mount directories. SQL Server data is kept in Docker named volumes (`sql-data`, `sql-backup`) which Docker manages automatically — no permission setup needed.
-
-**3. Start the stack:**
+**2. Start the stack:**
 
 ```bash
 docker compose up -d
 ```
 
-**4. Trigger the first database import:**
+**3. Trigger the first database import:**
 
 ```bash
 curl -X POST http://localhost:5000/db/import
@@ -362,14 +354,12 @@ Entries for a specific hour (0–23).
 
 ## Data directories
 
-These local directories are created automatically by Docker on first run:
-
 | Location | Type | Contents |
 |---|---|---|
 | `sql-data` | Docker named volume | SQL Server data files — managed by Docker |
 | `sql-backup` | Docker named volume | Staged BAK files used during restore — managed by Docker |
-| `./logs` | Bind mount | NL9 traffic log files |
-| `./backups` | Bind mount | NL9 daily backup zips |
+| `./logs` | Network-mounted bind mount | NL9 traffic log files |
+| `./backups` | Network-mounted bind mount | NL9 daily backup zips |
 
 ---
 
