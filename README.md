@@ -118,9 +118,10 @@ List clients. Returns active clients by default.
 
 | Param | Description |
 |---|---|
-| `?id=` | Filter by exact customer ID |
+| `?id=` / `?custid=` | Filter by exact customer ID |
 | `?q=` | Search name, billing name, or contact (substring) |
-| `?inactive=1` | Include inactive clients |
+| `?inactive=1` | Only inactive clients (default: active only) |
+| `?is_empty=<field>` | Only clients where the field is null or empty (e.g. `EMail`, `Telephone`) |
 
 ```json
 {
@@ -166,6 +167,7 @@ List orders, sorted most recent first. Excludes deleted orders by default.
 | `?valid_before=YYYY-MM-DD` | `Status=Active` and StartDate on or before date |
 | `?missing_copy=1` | Only orders with at least one line missing a copy assignment |
 | `?exclude_custid=1,2,3` | Exclude one or more customers (comma-separated IDs) |
+| `?is_empty=<field>` | Only orders where the field is null or empty (e.g. `PurchaseOrder`, `AccountRep`) |
 
 ```json
 {
@@ -210,7 +212,6 @@ List copy records, sorted most recent first. Returns active copy by default.
 |---|---|
 | `?custid=` | Filter by customer ID |
 | `?q=` | Search label, copy ID, or script text (substring) |
-| `?inactive=1` | Include inactive copy |
 | `?status=` | Filter by status (e.g. `Ok`, `Deleted`) |
 | `?on_date=YYYY-MM-DD` | Only copy with `Status=Ok` whose start/end range covers the date (TFN-safe) |
 | `?valid_after=YYYY-MM-DD` | `Status=Ok` and EndDate on or after date |
@@ -220,6 +221,7 @@ List copy records, sorted most recent first. Returns active copy by default.
 | `?end_after=YYYY-MM-DD` | EndDate on or after date |
 | `?end_before=YYYY-MM-DD` | EndDate on or before date |
 | `?exclude_custid=1,2,3` | Exclude one or more customers (comma-separated IDs) |
+| `?is_empty=<field>` | Only copy where the field is null or empty (e.g. `AudioFileName`, `Voice`) |
 
 ```json
 {

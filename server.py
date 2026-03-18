@@ -159,6 +159,37 @@ def filter_entries(entries):
             entries = sorted(entries, key=lambda e: str(e.get(sort_key, "")), reverse=reverse)
     return entries
 
+# ─── Query helpers ────────────────────────────────────────────────────────────
+
+_ALLOWED_FIELDS = {
+    "clients": {
+        "CustID", "Tag", "Sponsor", "BillingName", "AgencyID",
+        "Address1", "Address2", "CityState", "ZipCode",
+        "Telephone", "Fax", "Contact", "Salutation", "EMail",
+        "AccountRepCust", "RevenueTypeCust", "BillCycleCust",
+        "Balance", "CreditLimit", "CustomerSince", "LastActiveDate", "LastPaymentDate",
+    },
+    "orders": {
+        "Status", "OrderType", "PkgDescription", "RevenueType", "BillCycle",
+        "BillBasis", "PurchaseOrder", "Product", "AccountRep", "Regarding",
+        "StartDate", "EndDate",
+    },
+    "copy": {
+        "CopyID", "CopyType", "Label", "Status", "Length", "Voice",
+        "AudioFileName", "CopyInstructions", "Script", "StartDate", "EndDate",
+    },
+}
+
+
+def is_empty_condition(field, table, endpoint):
+    """Return a SQL condition for (field IS NULL OR field = '') after validating the field name."""
+    allowed = _ALLOWED_FIELDS.get(endpoint, set())
+    if field not in allowed:
+        raise ValueError(f"Field '{field}' is not filterable on {endpoint}")
+    col = f"{table}.{field}" if table else field
+    return f"({col} IS NULL OR {col} = '')"
+
+
 # ─── DB helpers ───────────────────────────────────────────────────────────────
 
 def get_conn(db=None, autocommit=False):
@@ -374,22 +405,23 @@ def clients():
     """
     GET /clients
     Query params:
-      ?id=<CustID>        exact customer ID
+      ?id=<CustID>        exact customer ID (also accepted as ?custid=)
       ?q=<text>           search Sponsor, BillingName, Contact (case-insensitive)
-      ?inactive=1         include inactive customers (default: active only)
+      ?inactive=1         only inactive clients (default: active only)
+      ?is_empty=<field>   only clients where the specified field is null or empty
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        cust_id  = request.args.get("id")
+        cust_id  = request.args.get("custid") or request.args.get("id")
         q        = request.args.get("q")
         inactive = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
+        is_empty = request.args.get("is_empty")
 
         conditions = []
         params = []
 
-        if not inactive:
-            conditions.append("Inactive = 0")
+        conditions.append("Inactive = 1" if inactive else "Inactive = 0")
         if cust_id:
             conditions.append("CustID = %s")
             params.append(int(cust_id))
@@ -397,6 +429,8 @@ def clients():
             conditions.append("(Sponsor LIKE %s OR BillingName LIKE %s OR Contact LIKE %s)")
             like = f"%{q}%"
             params.extend([like, like, like])
+        if is_empty:
+            conditions.append(is_empty_condition(is_empty, "", "clients"))
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = db_query(f"""
@@ -452,6 +486,7 @@ def orders():
       ?valid_before=YYYY-MM-DD  Status=Active and StartDate <= date (valid by date)
       ?missing_copy=1           only orders with at least one line missing copy
       ?exclude_custid=1,2,3     exclude one or more customers (comma-separated)
+      ?is_empty=<field>         only orders where the specified field is null or empty
     """
     if not DB_AVAILABLE:
         return db_unavailable()
@@ -467,6 +502,7 @@ def orders():
         valid_before   = request.args.get("valid_before")
         missing_copy   = request.args.get("missing_copy", "0").lower() in ("1", "true", "yes")
         exclude_custid = [int(x) for x in request.args.get("exclude_custid", "").split(",") if x.strip()]
+        is_empty       = request.args.get("is_empty")
 
         conditions = []
         params = []
@@ -511,6 +547,8 @@ def orders():
             placeholders = ", ".join(["%s"] * len(exclude_custid))
             conditions.append(f"o.CustID NOT IN ({placeholders})")
             params.extend(exclude_custid)
+        if is_empty:
+            conditions.append(is_empty_condition(is_empty, "o", "orders"))
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = db_query(f"""
@@ -590,7 +628,6 @@ def copy_list():
     Query params:
       ?custid=<CustID>          filter by customer
       ?q=<text>                 search Label, CopyID, Script (case-insensitive)
-      ?inactive=1               include inactive copy (default: active only)
       ?status=<Status>          filter by status (e.g. Ok, Deleted)
       ?on_date=YYYY-MM-DD       only copy with Status=Ok and date within StartDate/EndDate
       ?valid_after=YYYY-MM-DD   Status=Ok and EndDate >= date (still valid after date)
@@ -600,13 +637,13 @@ def copy_list():
       ?end_after=YYYY-MM-DD     EndDate >= date
       ?end_before=YYYY-MM-DD    EndDate <= date
       ?exclude_custid=1,2,3     exclude one or more customers (comma-separated)
+      ?is_empty=<field>         only copy where the specified field is null or empty
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
         cust_id        = request.args.get("custid")
         q              = request.args.get("q")
-        inactive       = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
         status         = request.args.get("status")
         on_date        = request.args.get("on_date")
         valid_after    = request.args.get("valid_after")
@@ -616,12 +653,11 @@ def copy_list():
         end_after      = request.args.get("end_after")
         end_before     = request.args.get("end_before")
         exclude_custid = [int(x) for x in request.args.get("exclude_custid", "").split(",") if x.strip()]
+        is_empty       = request.args.get("is_empty")
 
         conditions = []
         params = []
 
-        if not inactive:
-            conditions.append("cm.Inactive = 0")
         if cust_id:
             conditions.append("cm.CustID = %s")
             params.append(int(cust_id))
@@ -659,6 +695,8 @@ def copy_list():
             placeholders = ", ".join(["%s"] * len(exclude_custid))
             conditions.append(f"cm.CustID NOT IN ({placeholders})")
             params.extend(exclude_custid)
+        if is_empty:
+            conditions.append(is_empty_condition(is_empty, "cm", "copy"))
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = db_query(f"""
