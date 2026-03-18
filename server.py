@@ -523,6 +523,7 @@ def orders():
                     SELECT 1 FROM OrderLines ol
                     WHERE ol.CustID = o.CustID AND ol.OrderID = o.OrderID
                     AND (ol.CopyIDLong IS NULL OR ol.CopyIDLong = 0)
+                    AND ol.LineLogType <> 'MAC'
                 )
             """)
         if start_after:
