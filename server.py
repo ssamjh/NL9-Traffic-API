@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import zipfile
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from flask import Flask, jsonify, abort, request
 from flask.json.provider import DefaultJSONProvider
@@ -487,6 +487,7 @@ def orders():
       ?missing_copy=1           only orders with at least one line missing copy
       ?exclude_custid=1,2,3     exclude one or more customers (comma-separated)
       ?is_empty=<field>         only orders where the specified field is null or empty
+      ?include_lines=1          embed order lines (with CopyLabel/CopyCode) in each order
     """
     if not DB_AVAILABLE:
         return db_unavailable()
@@ -503,6 +504,7 @@ def orders():
         missing_copy   = request.args.get("missing_copy", "0").lower() in ("1", "true", "yes")
         exclude_custid = [int(x) for x in request.args.get("exclude_custid", "").split(",") if x.strip()]
         is_empty       = request.args.get("is_empty")
+        include_lines  = request.args.get("include_lines", "0").lower() in ("1", "true", "yes")
 
         conditions = []
         params = []
@@ -564,6 +566,27 @@ def orders():
             {where}
             ORDER BY o.StartDate DESC, o.CustID, o.OrderID
         """, params)
+        if include_lines and rows:
+            for r in rows:
+                r["lines"] = []
+            order_map = {(r["CustID"], r["OrderID"]): r for r in rows}
+            pairs = list(order_map.keys())
+            or_clauses = " OR ".join(["(ol.CustID = %s AND ol.OrderID = %s)"] * len(pairs))
+            flat_params = [x for pair in pairs for x in pair]
+            all_lines = db_query(f"""
+                SELECT ol.*,
+                       cm.Label AS CopyLabel, cm.CopyID AS CopyCode,
+                       cm.Length AS CopyLength, cm.AudioFileName
+                FROM OrderLines ol
+                LEFT JOIN CopyManager cm ON ol.CopyIDLong = cm.CopyIDLong
+                WHERE {or_clauses}
+                ORDER BY ol.CustID, ol.OrderID, ol.LineIndex
+            """, flat_params)
+            for line in all_lines:
+                key = (line["CustID"], line["OrderID"])
+                if key in order_map:
+                    order_map[key]["lines"].append(line)
+
         return jsonify({"count": len(rows), "orders": rows})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -755,21 +778,20 @@ def copy_detail(copy_id):
 def copy_resolve(copy_id):
     """
     GET /copy/<CopyID>/resolve
-    Resolves a packet or rotator to all audio files active on a given date.
+    Resolves a packet or rotator to all audio files active on a given date or date range.
 
     Query params:
-      ?date=YYYY-MM-DD  date to resolve for (default: today)
+      ?date=YYYY-MM-DD              single date to resolve for (default: today)
+      ?start=YYYY-MM-DD&end=YYYY-MM-DD  resolve for every day in the range (inclusive);
+                                        returns a "days" array instead of a flat "resolved" list
 
     Returns the resolution path taken and all resulting audio files.
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        date_str = request.args.get("date")
-        if date_str:
-            resolve_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        else:
-            resolve_date = date.today()
+        start_str = request.args.get("start")
+        end_str   = request.args.get("end")
 
         rows = db_query("""
             SELECT CopyIDLong, CopyID FROM CopyManager
@@ -779,12 +801,40 @@ def copy_resolve(copy_id):
         if not rows:
             abort(404)
 
-        resolved = _resolve_copy(rows[0]["CopyIDLong"], resolve_date)
+        copy_id_long = rows[0]["CopyIDLong"]
+
+        if start_str or end_str:
+            if not start_str or not end_str:
+                return jsonify({"error": "Both start and end are required for range resolve"}), 400
+            start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            end_date   = datetime.strptime(end_str,   "%Y-%m-%d").date()
+            if end_date < start_date:
+                return jsonify({"error": "end must be >= start"}), 400
+            days = []
+            d = start_date
+            while d <= end_date:
+                resolved = _resolve_copy(copy_id_long, d)
+                days.append({
+                    "date":        d.isoformat(),
+                    "audio_count": len(resolved),
+                    "resolved":    resolved,
+                })
+                d += timedelta(days=1)
+            return jsonify({
+                "copy_id": copy_id,
+                "start":   start_date.isoformat(),
+                "end":     end_date.isoformat(),
+                "days":    days,
+            })
+
+        date_str = request.args.get("date")
+        resolve_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else date.today()
+        resolved = _resolve_copy(copy_id_long, resolve_date)
         return jsonify({
-            "copy_id": copy_id,
-            "date": resolve_date.isoformat(),
+            "copy_id":     copy_id,
+            "date":        resolve_date.isoformat(),
             "audio_count": len(resolved),
-            "resolved": resolved,
+            "resolved":    resolved,
         })
     except ValueError:
         return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400

@@ -155,11 +155,14 @@ List orders, sorted most recent first. Excludes deleted orders by default.
 | `?start_before=YYYY-MM-DD` | StartDate on or before date |
 | `?end_after=YYYY-MM-DD` | EndDate on or after date |
 | `?end_before=YYYY-MM-DD` | EndDate on or before date |
-| `?valid_after=YYYY-MM-DD` | `Status=Active` and EndDate on or after date |
-| `?valid_before=YYYY-MM-DD` | `Status=Active` and StartDate on or before date |
+| `?valid_after=YYYY-MM-DD` | `Status=Ok` and EndDate on or after date |
+| `?valid_before=YYYY-MM-DD` | `Status=Ok` and StartDate on or before date |
 | `?missing_copy=1` | Only orders with at least one line missing a copy assignment |
 | `?exclude_custid=1,2,3` | Exclude one or more customers (comma-separated IDs) |
 | `?is_empty=<field>` | Only orders where the field is null or empty (e.g. `PurchaseOrder`, `AccountRep`) |
+| `?include_lines=1` | Embed order lines (with `CopyLabel`, `CopyCode`, `CopyLength`, `AudioFileName`) into each order |
+
+Without `?include_lines=1`:
 
 ```json
 {
@@ -168,12 +171,38 @@ List orders, sorted most recent first. Excludes deleted orders by default.
     {
       "CustID": 101,
       "OrderID": 55,
-      "Status": "Active",
+      "Status": "Ok",
       "OrderAmount": 1200.0,
       "OrderSpots": 20,
       "StartDate": "2026-03-01T00:00:00",
       "EndDate": "2026-03-31T00:00:00",
       "Sponsor": "Acme Radio Co."
+    }
+  ]
+}
+```
+
+With `?include_lines=1`, each order gains a `lines` array (same fields as `GET /orders/<CustID>-<OrderID>`):
+
+```json
+{
+  "count": 1,
+  "orders": [
+    {
+      "CustID": 101,
+      "OrderID": 55,
+      "Status": "Ok",
+      "Sponsor": "Acme Radio Co.",
+      "lines": [
+        {
+          "LineIndex": 1,
+          "CopyIDLong": 8842,
+          "CopyCode": "ACM001",
+          "CopyLabel": "Acme Summer Sale :30",
+          "CopyLength": "30",
+          "AudioFileName": "ACM001.wav"
+        }
+      ]
     }
   ]
 }
@@ -239,7 +268,9 @@ Full copy detail including script, copy instructions, and rotator lines.
 
 #### `GET /copy/<CopyID>/resolve`
 
-Resolves a packet or rotator to all audio files active on a given date. Follows nested packets and rotators recursively, filtering each level by date range and day of week.
+Resolves a packet or rotator to all audio files active on a given date or date range. Follows nested packets and rotators recursively, filtering each level by date range and day of week.
+
+**Single date** (default: today):
 
 | Param | Default | Description |
 |---|---|---|
@@ -257,7 +288,27 @@ Resolves a packet or rotator to all audio files active on a given date. Follows 
 }
 ```
 
-`audio_count: 0` means no lines are active for the given date/day.
+**Date range** — resolves every day in the range in one call:
+
+| Param | Description |
+|---|---|
+| `?start=YYYY-MM-DD` | First date (required with `end`) |
+| `?end=YYYY-MM-DD` | Last date inclusive (required with `start`) |
+
+```json
+{
+  "copy_id": "P001",
+  "start": "2026-03-18",
+  "end": "2026-03-20",
+  "days": [
+    { "date": "2026-03-18", "audio_count": 2, "resolved": [ ... ] },
+    { "date": "2026-03-19", "audio_count": 1, "resolved": [ ... ] },
+    { "date": "2026-03-20", "audio_count": 2, "resolved": [ ... ] }
+  ]
+}
+```
+
+`audio_count: 0` for a day means no lines are active for that date/day-of-week.
 
 ---
 
