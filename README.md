@@ -151,13 +151,18 @@ Full client detail with agency information.
 
 #### `GET /orders`
 
-List orders. Excludes deleted orders by default.
+List orders, sorted most recent first. Excludes deleted orders by default.
 
 | Param | Description |
 |---|---|
 | `?custid=` | Filter by customer ID |
 | `?status=` | Filter by status (e.g. `Active`, `Closed`) |
 | `?deleted=1` | Include deleted orders |
+| `?start_after=YYYY-MM-DD` | StartDate on or after date |
+| `?start_before=YYYY-MM-DD` | StartDate on or before date |
+| `?end_after=YYYY-MM-DD` | EndDate on or after date |
+| `?end_before=YYYY-MM-DD` | EndDate on or before date |
+| `?missing_copy=1` | Only orders with at least one line missing a copy assignment |
 
 ```json
 {
@@ -196,13 +201,17 @@ Response includes:
 
 #### `GET /copy`
 
-List copy records. Returns active copy by default.
+List copy records, sorted most recent first. Returns active copy by default.
 
 | Param | Description |
 |---|---|
 | `?custid=` | Filter by customer ID |
 | `?q=` | Search label, copy ID, or script text (substring) |
 | `?inactive=1` | Include inactive copy |
+| `?start_after=YYYY-MM-DD` | StartDate on or after date |
+| `?start_before=YYYY-MM-DD` | StartDate on or before date |
+| `?end_after=YYYY-MM-DD` | EndDate on or after date |
+| `?end_before=YYYY-MM-DD` | EndDate on or before date |
 
 ```json
 {
@@ -222,9 +231,31 @@ List copy records. Returns active copy by default.
 }
 ```
 
-#### `GET /copy/<CopyIDLong>`
+#### `GET /copy/<CopyID>`
 
 Full copy detail including script, copy instructions, and rotator lines.
+
+#### `GET /copy/<CopyID>/resolve`
+
+Resolves a packet or rotator to all audio files active on a given date. Follows nested packets and rotators recursively, filtering each level by date range and day of week.
+
+| Param | Default | Description |
+|---|---|---|
+| `?date=YYYY-MM-DD` | today | Date to resolve for |
+
+```json
+{
+  "copy_id": "P001",
+  "date": "2026-03-18",
+  "audio_count": 2,
+  "resolved": [
+    { "audio": "ACM001.wav", "path": ["P001", "R002", "ACM001"] },
+    { "audio": "ACM002.wav", "path": ["P001", "ACM002"] }
+  ]
+}
+```
+
+`audio_count: 0` means no lines are active for the given date/day.
 
 ---
 

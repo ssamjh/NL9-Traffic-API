@@ -441,16 +441,26 @@ def orders():
     """
     GET /orders
     Query params:
-      ?custid=<CustID>    filter by customer
-      ?status=<Status>    filter by order status (e.g. Active, Closed)
-      ?deleted=1          include deleted orders (default: excluded)
+      ?custid=<CustID>          filter by customer
+      ?status=<Status>          filter by order status (e.g. Active, Closed)
+      ?deleted=1                include deleted orders (default: excluded)
+      ?start_after=YYYY-MM-DD   StartDate >= date
+      ?start_before=YYYY-MM-DD  StartDate <= date
+      ?end_after=YYYY-MM-DD     EndDate >= date
+      ?end_before=YYYY-MM-DD    EndDate <= date
+      ?missing_copy=1           only orders with at least one line missing copy
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        cust_id = request.args.get("custid") or request.args.get("id")
-        status  = request.args.get("status")
-        deleted = request.args.get("deleted", "0").lower() in ("1", "true", "yes")
+        cust_id      = request.args.get("custid") or request.args.get("id")
+        status       = request.args.get("status")
+        deleted      = request.args.get("deleted", "0").lower() in ("1", "true", "yes")
+        start_after  = request.args.get("start_after")
+        start_before = request.args.get("start_before")
+        end_after    = request.args.get("end_after")
+        end_before   = request.args.get("end_before")
+        missing_copy = request.args.get("missing_copy", "0").lower() in ("1", "true", "yes")
 
         conditions = []
         params = []
@@ -463,6 +473,26 @@ def orders():
         if status:
             conditions.append("o.Status = %s")
             params.append(status)
+        if missing_copy:
+            conditions.append("""
+                EXISTS (
+                    SELECT 1 FROM OrderLines ol
+                    WHERE ol.CustID = o.CustID AND ol.OrderID = o.OrderID
+                    AND (ol.CopyIDLong IS NULL OR ol.CopyIDLong = 0)
+                )
+            """)
+        if start_after:
+            conditions.append("o.StartDate >= %s")
+            params.append(start_after)
+        if start_before:
+            conditions.append("o.StartDate <= %s")
+            params.append(start_before)
+        if end_after:
+            conditions.append("o.EndDate >= %s")
+            params.append(end_after)
+        if end_before:
+            conditions.append("o.EndDate <= %s")
+            params.append(end_before)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = db_query(f"""
@@ -476,7 +506,7 @@ def orders():
             FROM Orders o
             LEFT JOIN Customers c ON o.CustID = c.CustID
             {where}
-            ORDER BY o.CustID, o.OrderID
+            ORDER BY o.StartDate DESC, o.CustID, o.OrderID
         """, params)
         return jsonify({"count": len(rows), "orders": rows})
     except Exception as exc:
@@ -540,16 +570,24 @@ def copy_list():
     """
     GET /copy
     Query params:
-      ?custid=<CustID>    filter by customer
-      ?q=<text>           search Label, CopyID, Script (case-insensitive)
-      ?inactive=1         include inactive copy (default: active only)
+      ?custid=<CustID>          filter by customer
+      ?q=<text>                 search Label, CopyID, Script (case-insensitive)
+      ?inactive=1               include inactive copy (default: active only)
+      ?start_after=YYYY-MM-DD   StartDate >= date
+      ?start_before=YYYY-MM-DD  StartDate <= date
+      ?end_after=YYYY-MM-DD     EndDate >= date
+      ?end_before=YYYY-MM-DD    EndDate <= date
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        cust_id  = request.args.get("custid")
-        q        = request.args.get("q")
-        inactive = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
+        cust_id      = request.args.get("custid")
+        q            = request.args.get("q")
+        inactive     = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
+        start_after  = request.args.get("start_after")
+        start_before = request.args.get("start_before")
+        end_after    = request.args.get("end_after")
+        end_before   = request.args.get("end_before")
 
         conditions = []
         params = []
@@ -563,6 +601,18 @@ def copy_list():
             conditions.append("(cm.Label LIKE %s OR cm.CopyID LIKE %s OR cm.Script LIKE %s)")
             like = f"%{q}%"
             params.extend([like, like, like])
+        if start_after:
+            conditions.append("cm.StartDate >= %s")
+            params.append(start_after)
+        if start_before:
+            conditions.append("cm.StartDate <= %s")
+            params.append(start_before)
+        if end_after:
+            conditions.append("cm.EndDate >= %s")
+            params.append(end_after)
+        if end_before:
+            conditions.append("cm.EndDate <= %s")
+            params.append(end_before)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = db_query(f"""
@@ -575,25 +625,32 @@ def copy_list():
             FROM CopyManager cm
             LEFT JOIN Customers c ON cm.CustID = c.CustID
             {where}
-            ORDER BY cm.CustID, cm.CopyID
+            ORDER BY cm.StartDate DESC, cm.CustID, cm.CopyID
         """, params)
         return jsonify({"count": len(rows), "copy": rows})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
 
-@app.route("/copy/<int:copy_id_long>")
-def copy_detail(copy_id_long):
-    """GET /copy/<CopyIDLong> — full copy record with rotator lines."""
+@app.route("/copy/<copy_id>")
+def copy_detail(copy_id):
+    """
+    GET /copy/<CopyID> — full copy record with rotator lines.
+    Query params:
+      ?inactive=1  include inactive/deleted records (default: active first)
+    """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        rows = db_query("""
+        inactive = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
+        where = "WHERE cm.CopyID = %s" if inactive else "WHERE cm.CopyID = %s AND cm.Inactive = 0"
+        rows = db_query(f"""
             SELECT cm.*, c.Sponsor
             FROM CopyManager cm
             LEFT JOIN Customers c ON cm.CustID = c.CustID
-            WHERE cm.CopyIDLong = %s
-        """, (copy_id_long,))
+            {where}
+            ORDER BY cm.Inactive ASC, cm.StartDate DESC
+        """, (copy_id,))
         if not rows:
             abort(404)
 
@@ -601,13 +658,103 @@ def copy_detail(copy_id_long):
             SELECT * FROM CopyRotatorLines
             WHERE CopyIDLong = %s
             ORDER BY RotLineIndex
-        """, (copy_id_long,))
+        """, (rows[0]["CopyIDLong"],))
 
         result = rows[0]
         result["rotator_lines"] = rotators
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/copy/<copy_id>/resolve")
+def copy_resolve(copy_id):
+    """
+    GET /copy/<CopyID>/resolve
+    Resolves a packet or rotator to all audio files active on a given date.
+
+    Query params:
+      ?date=YYYY-MM-DD  date to resolve for (default: today)
+
+    Returns the resolution path taken and all resulting audio files.
+    """
+    if not DB_AVAILABLE:
+        return db_unavailable()
+    try:
+        date_str = request.args.get("date")
+        if date_str:
+            resolve_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        else:
+            resolve_date = date.today()
+
+        rows = db_query("""
+            SELECT CopyIDLong, CopyID FROM CopyManager
+            WHERE CopyID = %s AND Inactive = 0
+            ORDER BY StartDate DESC
+        """, (copy_id,))
+        if not rows:
+            abort(404)
+
+        resolved = _resolve_copy(rows[0]["CopyIDLong"], resolve_date)
+        return jsonify({
+            "copy_id": copy_id,
+            "date": resolve_date.isoformat(),
+            "audio_count": len(resolved),
+            "resolved": resolved,
+        })
+    except ValueError:
+        return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+def _resolve_copy(copy_id_long, resolve_date, visited=None, depth=0):
+    """
+    Recursively resolve a CopyIDLong to leaf audio files.
+    Returns a list of dicts: {"audio": str, "path": [CopyID, ...]}
+    """
+    if visited is None:
+        visited = set()
+    if copy_id_long in visited:
+        return []
+    visited = visited | {copy_id_long}
+
+    rows = db_query(
+        "SELECT CopyIDLong, CopyID, CopyType, AudioFileName FROM CopyManager WHERE CopyIDLong = %s",
+        (copy_id_long,),
+    )
+    if not rows:
+        return []
+
+    copy = rows[0]
+    cid = (copy["CopyID"] or "").strip().upper()
+    is_container = cid.startswith("P") or cid.startswith("R")
+
+    if not is_container:
+        return [{"audio": copy["AudioFileName"], "path": [copy["CopyID"]]}]
+
+    day_col = f"RotLineDay{resolve_date.isoweekday()}"
+    date_str = resolve_date.isoformat()
+    lines = db_query(f"""
+        SELECT RotCopyIDLong, RotCopyID, RotLineIndex
+        FROM CopyRotatorLines
+        WHERE CopyIDLong = %s
+          AND CAST(RotLineStartDate AS DATE) <= %s
+          AND CAST(RotLineEndDate AS DATE) >= %s
+          AND {day_col} = 1
+        ORDER BY RotLineIndex
+    """, (copy_id_long, date_str, date_str))
+
+    results = []
+    for line in lines:
+        child = _resolve_copy(line["RotCopyIDLong"], resolve_date, visited, depth + 1)
+        for r in child:
+            results.append({
+                "audio": r["audio"],
+                "path": [copy["CopyID"]] + r["path"],
+            })
+
+    return results
 
 
 # ─── Account rep endpoints ────────────────────────────────────────────────────
