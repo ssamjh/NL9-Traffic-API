@@ -27,12 +27,26 @@ services:
       - ./backups:/backups:ro
       - sql-backup:/mssql-backup
     environment:
+      # ── Mode: "backup" (restore daily BAK) or "live" (connect directly to source server) ──
+      DB_MODE: backup
+
       LOG_DIR: /logs
+
+      # ── backup mode: local SQL Server container ──
       SQL_SERVER: sqlserver
       SQL_PORT: "1433"
       SQL_USER: sa
       SQL_PASS: "ChangeMe@Strong1"   # must match SA_PASSWORD above
       SQL_DB: NL9_Traffic
+
+      # ── live mode: comment out the backup block above and uncomment these ──
+      # SQL_SERVER: "192.168.1.x"    # IP or hostname of the NL9 server
+      # SQL_PORT: "1433"             # check ERRORLOG on NL9 server for actual port
+      # SQL_USER: api
+      # SQL_PASS: "change-me-password"
+      # SQL_DB: NL9_Traffic
+
+      # ── backup mode only ──
       BACKUP_DIR: /backups
       BACKUP_ZIP_NAME: NL9_Traffic.zip
       BACKUP_BAK_NAME: NL9_Traffic.BAK
