@@ -3,7 +3,18 @@
 A Flask API for Natural Log 9 (NL9) traffic data. Exposes two data sources:
 
 - **Traffic logs** — parses NL9 daily broadcast log files
-- **Database** — queries client, order, copy, and account rep data from a daily SQL Server backup
+- **Database** — queries client, order, copy, and account rep data from a SQL Server database
+
+---
+
+## Operating modes
+
+The API supports two database modes, controlled by the `DB_MODE` environment variable:
+
+| Mode | Value | How it works |
+|---|---|---|
+| **Backup/restore** (default) | `DB_MODE=backup` | Downloads a daily `.BAK` file, restores it into a local SQL Server container, and queries that. Imports run automatically each day. |
+| **Live** | `DB_MODE=live` | Connects directly to the source SQL Server using a read-only account. No backups are needed, no imports are scheduled. |
 
 ---
 
@@ -11,11 +22,11 @@ A Flask API for Natural Log 9 (NL9) traffic data. Exposes two data sources:
 
 - Docker and Docker Compose
 - NL9 log files in `./logs/`
-- NL9 daily database backups in `./backups/YYYY-MM-DD/`
+- **Backup mode only:** NL9 daily database backups in `./backups/YYYY-MM-DD/`
 
 ---
 
-## Setup
+## Setup — backup mode
 
 **1. Set a strong SQL Server password** in `docker-compose.yaml` — update `SA_PASSWORD` and `SQL_PASS` (both must match):
 
@@ -42,7 +53,123 @@ After that, imports run automatically each day at 5:00 AM (configurable).
 
 ---
 
+## Setup — live mode
+
+Point the API at the source SQL Server directly. No local SQL Server container is needed; remove or disable the `sqlserver` service from `docker-compose.yaml`.
+
+Set these environment variables in `docker-compose.yaml` (or however you run the API):
+
+```yaml
+DB_MODE:    "live"
+SQL_SERVER: "192.168.1.x"          # IP or hostname of the NL9 SQL Server
+SQL_PORT:   "1433"
+SQL_USER:   "api"
+SQL_PASS:   "your-api-password"
+SQL_DB:     "NL9_Traffic"
+```
+
+The `BACKUP_DIR`, `BACKUP_ZIP_NAME`, `BACKUP_BAK_NAME`, `IMPORT_HOUR`, `IMPORT_MINUTE`, and `SCHEDULER_TZ` variables are ignored in live mode.
+
+`GET /db/status` returns the current connection details. `POST /db/import` returns a 400 error (not applicable in live mode).
+
+---
+
+## Setting up the read-only SQL Server user
+
+The NL9 SQL Server (`NATURALSERVER` instance) has a logon trigger that restricts access, and the Dedicated Admin Connection (DAC) is disabled by default. Follow these steps to add a read-only `api` user.
+
+### Step 1 — Stop the SQL Server service
+
+Open a command prompt as Administrator on the NL9 server:
+
+```
+net stop MSSQL$NATURALSERVER
+```
+
+### Step 2 — Restart with trace flag 7806 to enable DAC
+
+```
+net start MSSQL$NATURALSERVER /T7806
+```
+
+### Step 3 — Connect using the Dedicated Admin Connection
+
+```
+sqlcmd -A -S localhost\NATURALSERVER
+```
+
+### Step 4 — Find the database name
+
+List the user databases on the server to confirm the correct database name:
+
+```sql
+SELECT name FROM sys.databases WHERE database_id > 4;
+GO
+```
+
+Note the name of the database you want to grant access to.
+
+### Step 5 — Create the login and grant read-only access
+
+Replace `api` with the desired username, `change-me-password` with a strong password, and `NL9_Traffic` with the database name from the previous step:
+
+```sql
+CREATE LOGIN [api] WITH PASSWORD = 'change-me-password';
+GO
+
+USE [NL9_Traffic];
+GO
+
+CREATE USER [api] FOR LOGIN [api];
+GO
+
+ALTER ROLE [db_datareader] ADD MEMBER [api];
+GO
+```
+
+### Step 6 — Whitelist the new user in the logon trigger
+
+The `Prevent_login` trigger only allows specific logins. Add the new user to the allowed list:
+
+```sql
+ALTER TRIGGER Prevent_login ON ALL SERVER WITH EXECUTE AS 'NBS_Software' FOR LOGON AS
+BEGIN
+    DECLARE @LoginName sysname
+    SET @LoginName = ORIGINAL_LOGIN()
+    IF(@LoginName NOT IN ('NBS_Software', 'api'))
+    BEGIN
+        ROLLBACK;
+    END
+END;
+GO
+```
+
+If adding another user in the future, add them to the `NOT IN` list as well.
+
+### Step 7 — Exit sqlcmd
+
+```
+EXIT
+```
+
+### Step 8 — Restart normally (without the trace flag)
+
+```
+net stop MSSQL$NATURALSERVER
+net start MSSQL$NATURALSERVER
+```
+
+### Step 9 — Test the new login
+
+```
+sqlcmd -S localhost\NATURALSERVER -U api -P change-me-password
+```
+
+---
+
 ## Backup folder structure
+
+_(Backup mode only)_
 
 ```
 backups/
@@ -62,15 +189,19 @@ All settings are environment variables configured in `docker-compose.yaml`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `SA_PASSWORD` / `SQL_PASS` | — | SQL Server SA password (set both to the same value) |
+| `DB_MODE` | `backup` | `backup` = restore daily BAK; `live` = connect directly to source server |
+| `SQL_SERVER` | `sqlserver` | SQL Server hostname or IP |
+| `SQL_PORT` | `1433` | SQL Server port |
+| `SQL_USER` | `sa` | SQL Server login username |
+| `SA_PASSWORD` / `SQL_PASS` | — | SQL Server SA password — backup mode only (set both to the same value) |
 | `LOG_DIR` | `/logs` | Path to NL9 log files |
-| `SQL_DB` | `NL9_Traffic` | Database name to restore into |
-| `BACKUP_DIR` | `/backups` | Path to dated backup folders |
-| `BACKUP_ZIP_NAME` | `NL9_Traffic.zip` | Zip file name inside each date folder |
-| `BACKUP_BAK_NAME` | `NL9_Traffic.BAK` | BAK file name inside the zip |
-| `IMPORT_HOUR` | `5` | Hour to run the daily import (0–23) |
-| `IMPORT_MINUTE` | `0` | Minute to run the daily import |
-| `SCHEDULER_TZ` | `Pacific/Auckland` | Timezone for the scheduler |
+| `SQL_DB` | `NL9_Traffic` | Database name |
+| `BACKUP_DIR` | `/backups` | Path to dated backup folders — backup mode only |
+| `BACKUP_ZIP_NAME` | `NL9_Traffic.zip` | Zip file name inside each date folder — backup mode only |
+| `BACKUP_BAK_NAME` | `NL9_Traffic.BAK` | BAK file name inside the zip — backup mode only |
+| `IMPORT_HOUR` | `5` | Hour to run the daily import (0–23) — backup mode only |
+| `IMPORT_MINUTE` | `0` | Minute to run the daily import — backup mode only |
+| `SCHEDULER_TZ` | `Pacific/Auckland` | Timezone for the scheduler — backup mode only |
 
 ---
 
@@ -82,12 +213,26 @@ All settings are environment variables configured in `docker-compose.yaml`.
 
 Shows import state and next scheduled run.
 
+Backup mode:
+
 ```json
 {
+  "mode": "backup",
   "last_imported": "2026-03-18",
   "latest_backup": "2026-03-18",
   "up_to_date": true,
   "next_scheduled_import": "2026-03-19T05:00:00+13:00"
+}
+```
+
+Live mode:
+
+```json
+{
+  "mode": "live",
+  "server": "192.168.1.x",
+  "database": "NL9_Traffic",
+  "info": "Connected directly to live database. No backup import scheduled."
 }
 ```
 
@@ -405,12 +550,12 @@ Entries for a specific hour (0–23).
 
 ## Data directories
 
-| Location | Type | Contents |
-|---|---|---|
-| `sql-data` | Docker named volume | SQL Server data files — managed by Docker |
-| `sql-backup` | Docker named volume | Staged BAK files used during restore — managed by Docker |
-| `./logs` | Network-mounted bind mount | NL9 traffic log files |
-| `./backups` | Network-mounted bind mount | NL9 daily backup zips |
+| Location | Type | Mode | Contents |
+|---|---|---|---|
+| `sql-data` | Docker named volume | backup only | SQL Server data files — managed by Docker |
+| `sql-backup` | Docker named volume | backup only | Staged BAK files used during restore — managed by Docker |
+| `./logs` | Network-mounted bind mount | both | NL9 traffic log files |
+| `./backups` | Network-mounted bind mount | backup only | NL9 daily backup zips |
 
 ---
 

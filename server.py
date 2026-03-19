@@ -62,6 +62,11 @@ IMPORT_HOUR   = int(os.environ.get("IMPORT_HOUR", "5"))
 IMPORT_MINUTE = int(os.environ.get("IMPORT_MINUTE", "0"))
 SCHEDULER_TZ  = os.environ.get("SCHEDULER_TZ", "UTC")
 
+# ─── Mode ─────────────────────────────────────────────────────────────────────
+# "backup" — restore daily BAK file, query the local SQL Server container
+# "live"   — connect directly to the source SQL Server (read-only account)
+DB_MODE = os.environ.get("DB_MODE", "backup").lower()
+
 # ─── Log parsing (existing) ───────────────────────────────────────────────────
 
 LINE_RE = re.compile(
@@ -365,11 +370,19 @@ def log_hour(date, hour):
 
 @app.route("/db/status")
 def db_status():
+    if DB_MODE == "live":
+        return jsonify({
+            "mode": "live",
+            "server": SQL_SERVER,
+            "database": SQL_DB,
+            "info": "Connected directly to live database. No backup import scheduled.",
+        })
     latest_date, _ = find_latest_backup()
     last_imported = get_last_imported()
-    job = _scheduler.get_job("daily_import")
+    job = _scheduler.get_job("daily_import") if _scheduler else None
     next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
     return jsonify({
+        "mode": "backup",
         "last_imported": last_imported,
         "latest_backup": latest_date,
         "up_to_date": (last_imported == latest_date) if (last_imported and latest_date) else False,
@@ -380,6 +393,8 @@ def db_status():
 @app.route("/db/import", methods=["POST"])
 def db_import():
     """Find and import the latest backup if it is newer than the last import."""
+    if DB_MODE == "live":
+        return jsonify({"error": "Not applicable in live mode. Set DB_MODE=backup to use backup/restore."}), 400
     if not DB_AVAILABLE:
         return jsonify({"error": "pymssql not installed"}), 500
 
@@ -967,17 +982,21 @@ def scheduled_import():
         logging.error("Scheduled import failed: %s", exc)
 
 
-_scheduler = BackgroundScheduler(timezone=SCHEDULER_TZ)
-_scheduler.add_job(
-    scheduled_import,
-    CronTrigger(hour=IMPORT_HOUR, minute=IMPORT_MINUTE, timezone=SCHEDULER_TZ),
-    id="daily_import",
-    replace_existing=True,
-    max_instances=1,
-    coalesce=True,
-)
-_scheduler.start()
-atexit.register(_scheduler.shutdown)
+_scheduler = None
+if DB_MODE == "backup":
+    _scheduler = BackgroundScheduler(timezone=SCHEDULER_TZ)
+    _scheduler.add_job(
+        scheduled_import,
+        CronTrigger(hour=IMPORT_HOUR, minute=IMPORT_MINUTE, timezone=SCHEDULER_TZ),
+        id="daily_import",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.start()
+    atexit.register(_scheduler.shutdown)
+else:
+    logging.info("DB_MODE=live — backup scheduler disabled, connecting directly to %s/%s", SQL_SERVER, SQL_DB)
 
 
 if __name__ == "__main__":
