@@ -57,12 +57,20 @@ After that, imports run automatically each day at 5:00 AM (configurable).
 
 Point the API at the source SQL Server directly. No local SQL Server container is needed; remove or disable the `sqlserver` service from `docker-compose.yaml`.
 
+**Finding the SQL Server port** — run this from an Administrator command prompt on the NL9 server:
+
+```
+type "C:\Program Files\Microsoft SQL Server\MSSQL12.NATURALSERVER\MSSQL\Log\ERRORLOG" | findstr /i "listening"
+```
+
+This prints the port the instance is actively listening on (typically 1433, but may differ).
+
 Set these environment variables in `docker-compose.yaml` (or however you run the API):
 
 ```yaml
 DB_MODE:    "live"
 SQL_SERVER: "192.168.1.x"          # IP or hostname of the NL9 SQL Server
-SQL_PORT:   "1433"
+SQL_PORT:   "1433"                 # port from the ERRORLOG command above
 SQL_USER:   "api"
 SQL_PASS:   "your-api-password"
 SQL_DB:     "NL9_Traffic"
