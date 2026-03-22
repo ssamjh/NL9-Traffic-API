@@ -302,7 +302,7 @@ List orders, sorted most recent first. Excludes deleted orders by default.
 | Param | Description |
 |---|---|
 | `?custid=` | Filter by customer ID |
-| `?status=` | Filter by status (e.g. `Active`, `Closed`) |
+| `?status=` | Filter by status (e.g. `Ok`, `Deleted`) |
 | `?deleted=1` | Include deleted orders |
 | `?start_after=YYYY-MM-DD` | StartDate on or after date |
 | `?start_before=YYYY-MM-DD` | StartDate on or before date |
