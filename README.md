@@ -3,7 +3,7 @@
 A Flask API for Natural Log 9 (NL9) traffic data. Exposes two data sources:
 
 - **Traffic logs** — parses NL9 daily broadcast log files
-- **Database** — queries client, order, copy, and account rep data from a SQL Server database
+- **Database** — queries client, order, copy, invoice, and account rep data from a SQL Server database
 
 ---
 
@@ -462,6 +462,52 @@ Resolves a packet or rotator to all audio files active on a given date or date r
 ```
 
 `audio_count: 0` for a day means no lines are active for that date/day-of-week.
+
+---
+
+### Invoices
+
+#### `GET /invoices`
+
+List invoices, sorted most recent first. Excludes deleted invoices by default.
+
+| Param | Description |
+|---|---|
+| `?custid=` | Filter by customer ID |
+| `?q=` | Search sponsor or billing name (substring) |
+| `?deleted=1` | Include deleted invoices |
+| `?trans_type=` | Filter by transaction type (e.g. `INV`) |
+| `?date_after=YYYY-MM-DD` | InvDate on or after date |
+| `?date_before=YYYY-MM-DD` | InvDate on or before date |
+
+```json
+{
+  "count": 1,
+  "invoices": [
+    {
+      "InvoiceIDLong": 1,
+      "InvoiceID": "26010001",
+      "InvTransType": "INV",
+      "InvDate": "2026-01-31T00:00:00",
+      "InvCustID": 101,
+      "InvOrderID": 55,
+      "InvSponsor": "...",
+      "InvBillingName": "...",
+      "InvGross": 200.0,
+      "InvTaxable": 200.0,
+      "InvTaxPct": 0.15
+    }
+  ]
+}
+```
+
+#### `GET /invoices/<InvoiceID>`
+
+Full invoice detail by human-readable invoice number (e.g. `26010001`) or by numeric `InvoiceIDLong`. Returns the invoice joined with the customer's contact details and account rep name.
+
+```
+GET /invoices/26010001
+```
 
 ---
 

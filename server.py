@@ -962,6 +962,97 @@ def rep_detail(rep_id):
         return jsonify({"error": str(exc)}), 500
 
 
+# ─── Invoice endpoints ───────────────────────────────────────────────────────
+
+@app.route("/invoices")
+def invoices():
+    """
+    GET /invoices
+    Query params:
+      ?custid=<CustID>          filter by customer
+      ?q=<text>                 search InvSponsor, InvBillingName (case-insensitive)
+      ?deleted=1                include deleted invoices (default: excluded)
+      ?trans_type=<type>        filter by InvTransType (e.g. INV)
+      ?date_after=YYYY-MM-DD    InvDate >= date
+      ?date_before=YYYY-MM-DD   InvDate <= date
+    """
+    if not DB_AVAILABLE:
+        return db_unavailable()
+    try:
+        cust_id      = request.args.get("custid") or request.args.get("id")
+        q            = request.args.get("q")
+        deleted      = request.args.get("deleted", "0").lower() in ("1", "true", "yes")
+        trans_type   = request.args.get("trans_type")
+        date_after   = request.args.get("date_after")
+        date_before  = request.args.get("date_before")
+
+        conditions = []
+        params = []
+
+        if not deleted:
+            conditions.append("InvDeleted = 0")
+        if cust_id:
+            conditions.append("InvCustID = %s")
+            params.append(int(cust_id))
+        if q:
+            conditions.append("(InvSponsor LIKE %s OR InvBillingName LIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like])
+        if trans_type:
+            conditions.append("InvTransType = %s")
+            params.append(trans_type)
+        if date_after:
+            conditions.append("CAST(InvDate AS DATE) >= %s")
+            params.append(date_after)
+        if date_before:
+            conditions.append("CAST(InvDate AS DATE) <= %s")
+            params.append(date_before)
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        rows = db_query(f"""
+            SELECT InvoiceIDLong, InvoiceID, InvDeleted, InvTransType, InvDate,
+                   InvStationID, InvCustID, InvOrderID, InvAgencyID, InvAccountRep,
+                   InvRevenueType, InvRevenueSource, InvSponsor, InvBillingName,
+                   InvAddress1, InvAddress2, InvCityState, InvZipCode,
+                   InvPurchaseOrder, InvProduct, InvBillCycle, InvType,
+                   InvRegarding, InvGross, InvTaxable, InvTaxID, InvTaxPct,
+                   InvDiscountPct, InvAgencyPct, InvAcctRepPct,
+                   InvEntryDateTime, InvTransmitDateTime
+            FROM Invoices
+            {where}
+            ORDER BY InvDate DESC, InvoiceIDLong DESC
+        """, params)
+        return jsonify({"count": len(rows), "invoices": rows})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/invoices/<invoice_id>")
+def invoice_detail(invoice_id):
+    """
+    GET /invoices/<InvoiceID>
+    Looks up by the human-readable InvoiceID string (e.g. 26010005).
+    Also accepts the numeric InvoiceIDLong.
+    """
+    if not DB_AVAILABLE:
+        return db_unavailable()
+    try:
+        rows = db_query("""
+            SELECT i.*,
+                   c.Sponsor, c.EMail, c.Telephone,
+                   ar.AccountRepName
+            FROM Invoices i
+            LEFT JOIN Customers c ON i.InvCustID = c.CustID
+            LEFT JOIN AccountReps ar ON i.InvAccountRep = ar.AccountRepID
+            WHERE i.InvoiceID = %s OR i.InvoiceIDLong = %s
+        """, (invoice_id, invoice_id))
+        if not rows:
+            abort(404)
+        return jsonify(rows[0])
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 # ─── Scheduler ───────────────────────────────────────────────────────────────
 
 def scheduled_import():
