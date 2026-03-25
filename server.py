@@ -829,7 +829,7 @@ def copy_resolve(copy_id):
             days = []
             d = start_date
             while d <= end_date:
-                resolved = _resolve_copy(copy_id_long, d)
+                resolved = _resolve_copy(copy_id_long, d) or []
                 days.append({
                     "date":        d.isoformat(),
                     "audio_count": len(resolved),
@@ -845,7 +845,7 @@ def copy_resolve(copy_id):
 
         date_str = request.args.get("date")
         resolve_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else date.today()
-        resolved = _resolve_copy(copy_id_long, resolve_date)
+        resolved = _resolve_copy(copy_id_long, resolve_date) or []
         return jsonify({
             "copy_id":     copy_id,
             "date":        resolve_date.isoformat(),
@@ -856,6 +856,16 @@ def copy_resolve(copy_id):
         return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+def _dates_valid(copy, resolve_date):
+    start = copy.get("StartDate")
+    end   = copy.get("EndDate")
+    if start and resolve_date < (start.date() if hasattr(start, "date") else start):
+        return False
+    if end and resolve_date > (end.date() if hasattr(end, "date") else end):
+        return False
+    return True
 
 
 def _resolve_copy(copy_id_long, resolve_date, visited=None, depth=0):
@@ -883,29 +893,27 @@ def _resolve_copy(copy_id_long, resolve_date, visited=None, depth=0):
     if not is_container:
         if copy.get("Inactive"):
             return []
-        start = copy.get("StartDate")
-        end = copy.get("EndDate")
-        if start and resolve_date < (start.date() if hasattr(start, "date") else start):
-            return []
-        if end and resolve_date > (end.date() if hasattr(end, "date") else end):
-            return []
+        if not _dates_valid(copy, resolve_date):
+            return None  # signals date invalidity to parent
         return [{"audio": copy["AudioFileName"], "path": [copy["CopyID"]]}]
 
+    if not _dates_valid(copy, resolve_date):
+        return None
+
     day_col = f"RotLineDay{resolve_date.isoweekday()}"
-    date_str = resolve_date.isoformat()
     lines = db_query(f"""
         SELECT RotCopyIDLong, RotCopyID, RotLineIndex
         FROM CopyRotatorLines
         WHERE CopyIDLong = %s
-          AND CAST(RotLineStartDate AS DATE) <= %s
-          AND CAST(RotLineEndDate AS DATE) >= %s
           AND {day_col} = 1
         ORDER BY RotLineIndex
-    """, (copy_id_long, date_str, date_str))
+    """, (copy_id_long,))
 
     results = []
     for line in lines:
         child = _resolve_copy(line["RotCopyIDLong"], resolve_date, visited, depth + 1)
+        if child is None:
+            return None  # propagate — one invalid copy means the whole rotator resolves to nothing
         for r in child:
             results.append({
                 "audio": r["audio"],
