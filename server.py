@@ -888,38 +888,56 @@ def _resolve_copy(copy_id_long, resolve_date, visited=None, depth=0):
 
     copy = rows[0]
     cid = (copy["CopyID"] or "").strip().upper()
-    is_container = cid.startswith("P") or cid.startswith("R")
+    is_packet   = cid.startswith("P")
+    is_rotator  = cid.startswith("R")
 
-    if not is_container:
+    if not is_packet and not is_rotator:
+        # Leaf audio copy
         if copy.get("Inactive"):
             return []
         if not _dates_valid(copy, resolve_date):
-            return None  # signals date invalidity to parent
+            return None  # signals date invalidity to parent rotator
         return [{"audio": copy["AudioFileName"], "path": [copy["CopyID"]]}]
 
-    if not _dates_valid(copy, resolve_date):
-        return None
+    day_col  = f"RotLineDay{resolve_date.isoweekday()}"
+    date_str = resolve_date.isoformat()
 
-    day_col = f"RotLineDay{resolve_date.isoweekday()}"
+    if is_rotator:
+        # Rotator: only the rotator's own overall dates matter, not individual line dates.
+        # All-or-nothing: if any child is date-invalid the whole rotator resolves to nothing.
+        if not _dates_valid(copy, resolve_date):
+            return []
+        lines = db_query(f"""
+            SELECT RotCopyIDLong, RotCopyID, RotLineIndex
+            FROM CopyRotatorLines
+            WHERE CopyIDLong = %s
+              AND {day_col} = 1
+            ORDER BY RotLineIndex
+        """, (copy_id_long,))
+        results = []
+        for line in lines:
+            child = _resolve_copy(line["RotCopyIDLong"], resolve_date, visited, depth + 1)
+            if child is None:
+                return []  # one invalid copy voids the whole rotator
+            for r in child:
+                results.append({"audio": r["audio"], "path": [copy["CopyID"]] + r["path"]})
+        return results
+
+    # Packet: line dates control which audio/rotator is active — filter by them.
     lines = db_query(f"""
         SELECT RotCopyIDLong, RotCopyID, RotLineIndex
         FROM CopyRotatorLines
         WHERE CopyIDLong = %s
+          AND CAST(RotLineStartDate AS DATE) <= %s
+          AND CAST(RotLineEndDate AS DATE) >= %s
           AND {day_col} = 1
         ORDER BY RotLineIndex
-    """, (copy_id_long,))
-
+    """, (copy_id_long, date_str, date_str))
     results = []
     for line in lines:
         child = _resolve_copy(line["RotCopyIDLong"], resolve_date, visited, depth + 1)
-        if child is None:
-            return None  # propagate — one invalid copy means the whole rotator resolves to nothing
-        for r in child:
-            results.append({
-                "audio": r["audio"],
-                "path": [copy["CopyID"]] + r["path"],
-            })
-
+        for r in (child or []):  # None from a child rotator treated as empty for this line
+            results.append({"audio": r["audio"], "path": [copy["CopyID"]] + r["path"]})
     return results
 
 
