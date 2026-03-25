@@ -420,18 +420,20 @@ def clients():
     """
     GET /clients
     Query params:
-      ?id=<CustID>        exact customer ID (also accepted as ?custid=)
-      ?q=<text>           search Sponsor, BillingName, Contact (case-insensitive)
-      ?inactive=1         only inactive clients (default: active only)
-      ?is_empty=<field>   only clients where the specified field is null or empty
+      ?id=<CustID>            exact customer ID (also accepted as ?custid=)
+      ?q=<text>               search Sponsor, BillingName, Contact (case-insensitive)
+      ?billing_name=<text>    search BillingName only (case-insensitive)
+      ?inactive=1             only inactive clients (default: active only)
+      ?is_empty=<field>       only clients where the specified field is null or empty
     """
     if not DB_AVAILABLE:
         return db_unavailable()
     try:
-        cust_id  = request.args.get("custid") or request.args.get("id")
-        q        = request.args.get("q")
-        inactive = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
-        is_empty = request.args.get("is_empty")
+        cust_id      = request.args.get("custid") or request.args.get("id")
+        q            = request.args.get("q")
+        billing_name = request.args.get("billing_name")
+        inactive     = request.args.get("inactive", "0").lower() in ("1", "true", "yes")
+        is_empty     = request.args.get("is_empty")
 
         conditions = []
         params = []
@@ -444,6 +446,9 @@ def clients():
             conditions.append("(Sponsor LIKE %s OR BillingName LIKE %s OR Contact LIKE %s)")
             like = f"%{q}%"
             params.extend([like, like, like])
+        if billing_name:
+            conditions.append("BillingName LIKE %s")
+            params.append(f"%{billing_name}%")
         if is_empty:
             conditions.append(is_empty_condition(is_empty, "", "clients"))
 

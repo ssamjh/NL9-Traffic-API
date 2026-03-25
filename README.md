@@ -265,6 +265,7 @@ List clients. Returns active clients by default.
 |---|---|
 | `?id=` / `?custid=` | Filter by exact customer ID |
 | `?q=` | Search name, billing name, or contact (substring) |
+| `?billing_name=` | Search billing name only (substring) |
 | `?inactive=1` | Only inactive clients (default: active only) |
 | `?is_empty=<field>` | Only clients where the field is null or empty (e.g. `EMail`, `Telephone`) |
 
