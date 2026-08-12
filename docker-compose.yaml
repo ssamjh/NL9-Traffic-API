@@ -15,8 +15,8 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "5m"
+        max-file: "2"
 
   trafficapi:
     build: .
@@ -58,11 +58,12 @@ services:
     depends_on:
       - sqlserver
     restart: unless-stopped
+    stop_grace_period: 5s
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   sql-data:

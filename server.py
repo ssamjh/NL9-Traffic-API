@@ -3,6 +3,8 @@ import glob
 import logging
 import os
 import re
+import signal
+import sys
 import zipfile
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -1116,9 +1118,26 @@ if DB_MODE == "backup":
         coalesce=True,
     )
     _scheduler.start()
-    atexit.register(_scheduler.shutdown)
+
+    def _shutdown_scheduler():
+        if _scheduler.running:
+            _scheduler.shutdown(wait=False)
+
+    atexit.register(_shutdown_scheduler)
 else:
     logging.info("DB_MODE=live — backup scheduler disabled, connecting directly to %s/%s", SQL_SERVER, SQL_DB)
+
+
+def _handle_shutdown(signum, frame):
+    # Flask's dev server runs as PID 1 in the container; without an explicit
+    # handler, SIGTERM is ignored by PID 1 and docker compose down has to
+    # wait out the full stop_grace_period before SIGKILL.
+    logging.info("Received signal %d, shutting down", signum)
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, _handle_shutdown)
+signal.signal(signal.SIGINT, _handle_shutdown)
 
 
 if __name__ == "__main__":
